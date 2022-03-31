@@ -11,7 +11,6 @@ subtype = df[subtypes]
 # Creates a new dataframe from the counts of each column
 subtype = subtype[subtype > 0].count()
     
-subtype.plot(kind='bar', title='Subtype Attribute Count', 
-                xlabel='Subtype', ylabel='Count')
+subtype.plot(kind='bar', title='Subtype Attribute Count')
 
 plt.savefig('../../reports/figures/subtype.png', bbox_inches = "tight")
