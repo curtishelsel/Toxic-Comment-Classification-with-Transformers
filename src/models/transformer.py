@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
-from positional_encoder import PositionalEncoding
-
+from models.positional_encoder import PositionalEncoding
 
 class Transformer(nn.Module):
     def __init__(self, num_tokens, dim_model, num_heads, num_enc_layers,
@@ -42,6 +41,7 @@ class Transformer(nn.Module):
         return output
 
     def get_target_mask(self, size) -> torch.tensor:
+    
         mask = torch.tril(torch.ones(size, size) == 1)
         mask = mask.float()
         mask = mask.masked_fill(mask == 0, float('-inf'))
