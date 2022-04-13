@@ -30,6 +30,6 @@ class BertClassifier(nn.Module):
         
         last_state = outputs[0][:, 0, :]
 
-        out = self.classifier(last_state)
+        out = self.fully_connected(last_state)
 
         return out
