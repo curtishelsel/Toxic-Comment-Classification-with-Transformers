@@ -2,8 +2,7 @@ import re
 from nltk.corpus import stopwords
 from sklearn.feature_extraction.text import TfidfVectorizer
 
-
-def text_preprocessing(s,i,total):
+def text_preprocessing(s):
     """
     - Lowercase the sentence
     - Change "'t" to "not"
@@ -29,8 +28,7 @@ def text_preprocessing(s,i,total):
                   or word in ['not', 'can']])
     # Remove trailing whitespace
     s = re.sub(r'\s+', ' ', s).strip()
-    if (i % 1000 == 0):
-        print(i, "/", total)
+
     return s
 
 def get_tfidf(x_train, x_test):
@@ -42,3 +40,20 @@ def get_tfidf(x_train, x_test):
 
     return x_train_tfidf, x_test_tfidf
 
+def bert_text_preprocessing(text):
+    """
+    - Remove entity mentions (eg. '@united')
+    - Correct errors (eg. '&amp;' to '&')
+    @param    text (str): a string to be processed.
+    @return   text (Str): the processed string.
+    """
+    # Remove '@name'
+    text = re.sub(r'(@.*?)[\s]', ' ', text)
+
+    # Replace '&amp;' with '&'
+    text = re.sub(r'&amp;', '&', text)
+
+    # Remove trailing whitespace
+    text = re.sub(r'\s+', ' ', text).strip()
+
+    return text

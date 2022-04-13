@@ -41,7 +41,6 @@ def evaluate_roc(probs, y_true, model_name):
     plt.ylim([0, 1])
     plt.ylabel('True Positive Rate')
     plt.xlabel('False Positive Rate')
-    plt.show()
     plt.savefig('../reports/figures/' + model_name + '_roc_auc.png')
 
 
@@ -51,7 +50,6 @@ def plot_auc_alpha(res, model_name):
     plt.title('AUC vs. Alpha')
     plt.xlabel('Alpha')
     plt.ylabel('AUC')
-    plt.show()
     plt.savefig('../reports/figures/' + model_name + '_auc_alpha.png')
 
 
