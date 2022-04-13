@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data import DataLoader
-from Dataloader import ToxicDataset
+from toxic_dataset import ToxicDataset
 
 def main():
     # Use GPU
