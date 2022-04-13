@@ -10,11 +10,12 @@ class ToxicDataset():
         self.x = data["comment_text"]
         self.y = data["target"]
         self.n_samples = len(data)
-        # print(self.x)
-        # print(self.y)
 
     def __getitem__(self, index):
         return self.x[index], self.y[index]
 
     def __len__(self):
         return self.n_samples
+
+    def get_values(self):
+        return self.x.values, self.y.values
