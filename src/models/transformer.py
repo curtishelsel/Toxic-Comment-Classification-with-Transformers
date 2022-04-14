@@ -1,50 +1,54 @@
 import torch
-import torch.nn as nn
+import math
+from torch import nn, Tensor
+import torch.nn.functional as F
 from models.positional_encoder import PositionalEncoding
+from torch.nn import TransformerEncoder, TransformerEncoderLayer
+from torch.utils.data import dataset
 
 class Transformer(nn.Module):
-    def __init__(self, num_tokens, dim_model, num_heads, num_enc_layers,
-                    num_dec_layers, dropout):
+    def __init__(self, ntoken: int, d_model: int, nhead: int, d_hid: int,
+                 nlayers: int, max_len: int, dropout: float = 0.5):
+
         super().__init__()
 
-        self.dim_model = dim_model
+        self.d_model = d_model
+
+        self.encoder = nn.Embedding(ntoken, d_model)
+        self.pos_encoder = PositionalEncoding(d_model, dropout, max_len)
+
+        encoder_layers = TransformerEncoderLayer(d_model, nhead, d_hid, dropout)
+        self.transformer_encoder = TransformerEncoder(encoder_layers, nlayers)
+
+        self.decoder = nn.Linear(d_model, 2)
         
-        self.positional_encoder = PositionalEncoding(dim_model=dim_model, 
-                                                        dropout=dropout,
-                                                        max_len=5000)
+        self.init_weights()
 
-        self.embedding = nn.Embedding(num_tokens, dim_model)
-
-        self.transformer = nn.Transformer(d_model = dim_model,
-                                            nhead = num_heads, 
-                                            num_encoder_layers = num_enc_layers,
-                                            num_decoder_layers = num_dec_layers,
-                                            dropout=dropout)
-
-        self.fc = nn.Linear(dim_model, 1)  
+    def init_weights(self) -> None:
+        initrange = 0.1
+        self.encoder.weight.data.uniform_(-initrange, initrange)
+        self.decoder.bias.data.zero_()
+        self.decoder.weight.data.uniform_(-initrange, initrange)
             
-    def forward(self, source, target, target_mask=None, source_pad_mask=None,
-                    target_pad_mask=None):
+    def forward(self, src: Tensor) -> Tensor:
+        """
+        Args:
+            src: Tensor, shape [seq_len, batch_size]
+            src_mask: Tensor, shape [seq_len, seq_len]
 
-        source = self.embedding(source) * math.sqrt(self.dim_model)
-        target = self.embedding(target) * math.sqrt(self.dim_model)
-        
-        source = self.positional_encoder(source)
-        target = self.positional_encoder(target)
+        Returns:
+            output Tensor of shape [seq_len, batch_size, ntoken]
+        """
+        src = self.encoder(src) * math.sqrt(self.d_model)
 
-        source = source.permute(1, 0, 2)
-        target = target.permute(1, 0, 2)
+        src = self.pos_encoder(src)
 
-        output = self.tranformer(source, target, tgt_mask=target_mask)
-        output = self.fc(output)
+        output = self.transformer_encoder(src)#, src_mask)
+        output = self.decoder(output)
+        output = torch.mean(output, 1)
 
         return output
 
-    def get_target_mask(self, size) -> torch.tensor:
-    
-        mask = torch.tril(torch.ones(size, size) == 1)
-        mask = mask.float()
-        mask = mask.masked_fill(mask == 0, float('-inf'))
-        mask = mask.masked_fill(mask == 1, float(0.0)) 
+    def generate_square_subsequent_mask(sz: int) -> Tensor:
+        return torch.triu(torch.ones(sz, sz) * float('-inf'), diagonal=1)
 
-        return mask
