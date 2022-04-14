@@ -1,3 +1,5 @@
+import os
+import pickle
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -5,6 +7,24 @@ from data.toxic_dataset import ToxicDataset
 from sklearn.naive_bayes import MultinomialNB
 from utils.text_processing import text_preprocessing, get_tfidf
 from utils.roc_auc import get_auc_CV, evaluate_roc, plot_auc_alpha
+
+def preprocess(data, name):
+
+    path = '../data/processed/clean_' + name.lower() + '.p' 
+
+    if os.path.exists(path):
+        processed_data = pickle.load(open(path, 'rb'))
+        print('Loading clean_{} from disk'.format(name.lower()))
+    else:
+        processed_data = []
+        with tqdm(data) as tdata:
+            tdata.set_description('{} Set'.format(name))
+            for sentence in tdata:
+                processed_data.append(text_preprocessing(sentence))
+
+        pickle.dump(processed_data, open(path, 'wb'))
+
+    return np.array(processed_data)
 
 def run_model():
     
@@ -19,22 +39,9 @@ def run_model():
 
     print('Text preprocessing')
     
-    X_train_preprocessed = []
-    X_test_preprocessed = []
+    X_train_preprocessed = preprocess(X_train, 'Train')
+    X_test_preprocessed = preprocess(X_test, 'Test')
 
-    print('Train preprocessing')
-    with tqdm(X_train) as tX_train:
-        for text in tX_train:
-            X_train_preprocessed.append(text_preprocessing(text))
-
-    print('Test preprocessing')
-    with tqdm(X_test) as tX_test:
-        for text in tX_test:
-            X_test_preprocessed.append(text_preprocessing(text))
-
-    
-    X_train_preprocessed = np.array(X_train_preprocessed)
-    X_test_preprocessed = np.array(X_test_preprocessed)
     print('Finished text preprocessing')
 
     print('Calculating TF-IDF')
