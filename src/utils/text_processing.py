@@ -3,15 +3,8 @@ from nltk.corpus import stopwords
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 def text_preprocessing(s):
-    """
-    - Lowercase the sentence
-    - Change "'t" to "not"
-    - Remove "@name"
-    - Isolate and remove punctuations except "?"
-    - Remove other special characters
-    - Remove stop words except "not" and "can"
-    - Remove trailing whitespace
-    """
+
+    # Change to lowercase
     s = s.lower()
     # Change 't to 'not'
     s = re.sub(r"\'t", " not", s)
@@ -41,12 +34,7 @@ def get_tfidf(x_train, x_test):
     return x_train_tfidf, x_test_tfidf
 
 def bert_text_preprocessing(text):
-    """
-    - Remove entity mentions (eg. '@united')
-    - Correct errors (eg. '&amp;' to '&')
-    @param    text (str): a string to be processed.
-    @return   text (Str): the processed string.
-    """
+
     # Remove '@name'
     text = re.sub(r'(@.*?)[\s]', ' ', text)
 
