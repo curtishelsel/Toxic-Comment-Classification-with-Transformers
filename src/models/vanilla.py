@@ -106,10 +106,6 @@ def train(model, train_dataloader, device, criterion, optimizer):
             # Computes gradient based on final loss
             optimizer.step()
 
-    # Compute the average loss
-    train_loss = train_loss / len(train_dataloader)
-        
-    print('Train Loss: {:.4f}'.format(train_loss))
 
 # Validates the trained model on unsee data
 def validate(model, val_dataloader, device, criterion):
@@ -155,8 +151,8 @@ def validate(model, val_dataloader, device, criterion):
     validation_loss = validation_loss / len(val_dataloader)
     validation_accuracy = validation_accuracy / len(val_dataloader)
 
-    print('Validation Loss: {:.4f}'.format(validation_loss))
     print('Validation Accuracy: {:.1f}%'.format(validation_accuracy))
+
     return validation_loss
 
 # Makes predictions on a test set
