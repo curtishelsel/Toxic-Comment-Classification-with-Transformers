@@ -1,29 +1,40 @@
+# Utility functions for processing text data and calculating the 
+# term frequency-inverse document frequency.
+# CAP6640 - Spring 2022  
+#   
+# Portions of this code are modified from this tutorial:
+# https://skimai.com/fine-tuning-bert-for-sentiment-analysis/
+
 import re
 from nltk.corpus import stopwords
 from sklearn.feature_extraction.text import TfidfVectorizer
 
-def text_preprocessing(s):
+# Formats a comment string for processing with the naive 
+# bayes and transformer  models
+def text_preprocessing(comment):
 
     # Change to lowercase
-    s = s.lower()
+    comment = comment.lower()
     # Change 't to 'not'
-    s = re.sub(r"\'t", " not", s)
+    comment = re.sub(r"\'t", " not", comment)
     # Remove @name
-    s = re.sub(r'(@.*?)[\s]', ' ', s)
+    comment = re.sub(r'(@.*?)[\s]', ' ', comment)
     # Isolate and remove punctuations except '?'
-    s = re.sub(r'([\'\"\.\(\)\!\?\\\/\,])', r' \1 ', s)
-    s = re.sub(r'[^\w\s\?]', ' ', s)
+    comment = re.sub(r'([\'\"\.\(\)\!\?\\\/\,])', r' \1 ', comment)
+    comment = re.sub(r'[^\w\s\?]', ' ', comment)
     # Remove some special characters
-    s = re.sub(r'([\;\:\|•«\n])', ' ', s)
+    comment = re.sub(r'([\;\:\|•«\n])', ' ', comment)
     # Remove stopwords except 'not' and 'can'
-    s = " ".join([word for word in s.split()
+    comment = " ".join([word for word in comment.split()
                   if word not in stopwords.words('english')
                   or word in ['not', 'can']])
     # Remove trailing whitespace
-    s = re.sub(r'\s+', ' ', s).strip()
+    comment = re.sub(r'\s+', ' ', comment).strip()
 
     return s
 
+# Calculates the term frequency-inverse document frequency for 
+# the train and test datasets
 def get_tfidf(x_train, x_test):
 
     tfidf = TfidfVectorizer(ngram_range=(1, 3), binary=True, smooth_idf=False)
@@ -33,15 +44,16 @@ def get_tfidf(x_train, x_test):
 
     return x_train_tfidf, x_test_tfidf
 
-def bert_text_preprocessing(text):
+# Formats a comment string for processing with the BERT model
+def bert_text_preprocessing(comment):
 
     # Remove '@name'
-    text = re.sub(r'(@.*?)[\s]', ' ', text)
+    comment = re.sub(r'(@.*?)[\s]', ' ', comment)
 
     # Replace '&amp;' with '&'
-    text = re.sub(r'&amp;', '&', text)
+    comment = re.sub(r'&amp;', '&', comment)
 
     # Remove trailing whitespace
-    text = re.sub(r'\s+', ' ', text).strip()
+    comment = re.sub(r'\s+', ' ', comment).strip()
 
-    return text
+    return comment
