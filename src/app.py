@@ -1,8 +1,10 @@
+# Application runs three different models on the toxic comment dataset
+# CAP6640 - Spring 2022  
+
 import argparse
 import models.bert as bert
 import models.vanilla as vanilla 
 import models.naive_bayes as naive_bayes
-from models.transformer import Transformer
 
 if __name__ == '__main__':
     
