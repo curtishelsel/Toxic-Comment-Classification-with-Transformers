@@ -1,67 +1,38 @@
+# A tranformer model for toxic comment sentiment analysis
+# CAP6640 - Spring 2022  
+#   
+# Portions of this code are modified from these tutorials:
+# https://skimai.com/fine-tuning-bert-for-sentiment-analysis/
+# https://pytorch.org/tutorials/beginner/transformer_tutorial.html
+
 import os
 import torch
-import pickle
 import numpy as np
 import torch.nn as nn
 from tqdm import tqdm
-from torch.optim import AdamW
+import utils.utils as utils
+from torch.optim import Adam
 import torch.nn.functional as F
 from utils.roc_auc import evaluate_roc
-from utils.earlystopping import EarlyStopping
 from models.transformer import Transformer
 from data.toxic_dataset import ToxicDataset
+from utils.earlystopping import EarlyStopping
 from torchtext.data.utils import get_tokenizer
-from utils.text_processing import text_preprocessing
 from sklearn.model_selection import train_test_split
 from torchtext.vocab import build_vocab_from_iterator
-from torch.utils.data import TensorDataset, DataLoader
-from torch.utils.data import RandomSampler, SequentialSampler
+from utils.text_processing import text_formatting, preprocess
 
-# Clears the cuda cache
-def initial_setup():
-    torch.cuda.empty_cache()
+# creates the vocab matrix for a set of comments
+def create_vocab(tokenizer, comments):
 
-# Checks for the available device on the system and returns device type
-def get_device():
+    special_tokens = ['<unk>', '<pad>']
+    train_iterator = map(tokenizer, iter(comments))
+    vocab = build_vocab_from_iterator(train_iterator, specials=special_tokens)
+    vocab.set_default_index(vocab['<unk>'])
 
-    use_cuda = torch.cuda.is_available()
-    device = torch.device('cuda' if use_cuda else 'cpu')
+    return vocab
 
-    print('Using {} for training.'.format(device))
-
-    return device
-
-def get_sentence_length(train, test, tokenizer):
-
-    full_dataset = np.concatenate([train, test])
-
-    max_len = 0
-    for comment in full_dataset:
-        tokenized = tokenizer(comment)
-        comment_length = len(tokenized)
-        if comment_length > max_len:
-            max_len = comment_length
-        
-    return max_len
-
-def preprocess(data, name):
-
-    path = '../data/processed/clean_' + name.lower() + '.p' 
-
-    if os.path.exists(path):
-        processed_data = pickle.load(open(path, 'rb'))
-        print('Loading clean_{} from disk'.format(name.lower()))
-    else:
-        processed_data = []
-        with tqdm(data) as tdata:
-            tdata.set_description('{} Set'.format(name))
-            for sentence in tdata:
-                processed_data.append(text_preprocessing(sentence))
-
-        pickle.dump(processed_data, open(path, 'wb'))
-
-    return processed_data
-
+# Encodes the dataset of tokens values based on the vocab
 def get_tokens(data, tokenizer, max_comment_length, vocab, name):
 
     token_ids = []
@@ -78,34 +49,18 @@ def get_tokens(data, tokenizer, max_comment_length, vocab, name):
             encoded = vocab.lookup_indices(tokenized)
             comment_length = len(encoded)
             difference = max_comment_length - comment_length
-            pad = np.full(difference, pad_token)
-            padded_encoded_token_ids = np.concatenate([encoded, pad])
 
-            token_ids.append(padded_encoded_token_ids)
+            # If comment is larger than max_comment_length, truncate to
+            # to max_comment_length, otherwise pad to max_comment_length
+            if difference < 0:
+                padded_truncated_encoded = encoded[:max_comment_length]
+            else:
+                pad = np.full(difference, pad_token)
+                padded_truncated_encoded = np.concatenate([encoded, pad])
+
+            token_ids.append(padded_truncated_encoded)
 
     return np.array(token_ids, dtype='int64')
-
-# Creates the tensors for the token ids, masks, and labels
-def create_tensors(token_ids, label):
-
-    token_ids = torch.tensor(token_ids)
-    label = torch.tensor(label)
-
-    return token_ids, label
-    
-def get_dataloader(tensors, batch_size, train=False):
-
-    token_ids, labels = tensors
-    # Create the dataset from the tensors
-    data = TensorDataset(token_ids, labels)
-    if train:
-        sampler = RandomSampler(data)
-    else:
-        sampler = SequentialSampler(data)
-    # Create the dataloader from the dataset
-    dataloader = DataLoader(data, sampler=sampler, batch_size=batch_size)
-    
-    return dataloader
 
 # Trains the model
 def train(model, train_dataloader, device, criterion, optimizer):
@@ -116,9 +71,13 @@ def train(model, train_dataloader, device, criterion, optimizer):
     train_loss= 0.0
 
     # Iterate over entire training samples (1 epoch)
-    with tqdm(train_dataloader, unit='batch') as tepoch:
-        for step, batch in enumerate(tepoch):
-            tepoch.set_description('Training')
+    with tqdm(train_dataloader, unit='batch') as ttrain:
+        for step, batch in enumerate(ttrain):
+
+            # Shows the changes in training loss over batches
+            current_loss = train_loss / (step + 1)
+            description = 'Training Loss {:.4}'.format(current_loss)
+            ttrain.set_description(description)
             
             token_ids, labels = batch
             
@@ -127,7 +86,7 @@ def train(model, train_dataloader, device, criterion, optimizer):
             labels = labels.to(device)
 
             # Reset model gradients Avoids grad accumulation
-            optimizer.zero_grad()
+            model.zero_grad()
 
             # Do forward pass for current set of data
             output = model(token_ids)
@@ -148,9 +107,9 @@ def train(model, train_dataloader, device, criterion, optimizer):
             optimizer.step()
 
     # Compute the average loss
-    average_loss = train_loss / len(train_dataloader)
+    train_loss = train_loss / len(train_dataloader)
         
-    print('Train Loss: {:.4f}'.format(average_loss))
+    print('Train Loss: {:.4f}'.format(train_loss))
 
 # Validates the trained model on unsee data
 def validate(model, val_dataloader, device, criterion):
@@ -158,13 +117,17 @@ def validate(model, val_dataloader, device, criterion):
     # Set model to eval mode before each epoch
     model.eval()
 
-    val_accuracy = 0.0
-    val_loss = 0.0
+    validation_accuracy = 0.0
+    validation_loss = 0.0
 
     # Iterate over entire validation samples (1 epoch)
-    with tqdm(val_dataloader, unit='batch') as tepoch:
-        for batch in tepoch:
-            tepoch.set_description('Validation')
+    with tqdm(val_dataloader, unit='batch') as tvalidation:
+        for step, batch in enumerate(tvalidation):
+
+            # Shows the changes in training loss over batches
+            current_loss = validation_loss / (step + 1)
+            description = 'Validation Loss {:.4}'.format(current_loss)
+            tvalidation.set_description(description)
 
             token_ids, labels = batch
             
@@ -180,21 +143,21 @@ def validate(model, val_dataloader, device, criterion):
             loss = criterion(output, labels)
 
             # Update the running validation loss
-            val_loss += loss.item()
+            validation_loss += loss.item()
 
-            preds = torch.argmax(output, dim=1).flatten()
+            predictions = torch.argmax(output, dim=1).flatten()
 
             # Update the running accuracy
-            accuracy = (preds == labels).cpu().numpy().mean() * 100
-            val_accuracy += accuracy
+            accuracy = (predictions == labels).cpu().numpy().mean() * 100
+            validation_accuracy += accuracy
 
     # Compute the average loss
-    val_loss = val_loss / len(val_dataloader)
-    val_accuracy = val_accuracy / len(val_dataloader)
+    validation_loss = validation_loss / len(val_dataloader)
+    validation_accuracy = validation_accuracy / len(val_dataloader)
 
-    print('Validation Loss: {:.4f}'.format(val_loss))
-    print('Validation Accuracy: {:.1f}%'.format(val_accuracy))
-    return val_loss
+    print('Validation Loss: {:.4f}'.format(validation_loss))
+    print('Validation Accuracy: {:.1f}%'.format(validation_accuracy))
+    return validation_loss
 
 # Makes predictions on a test set
 def predict(model, test_dataloader, device):
@@ -206,9 +169,9 @@ def predict(model, test_dataloader, device):
     predictions = []
 
     # Iterate over entire set of test samples 
-    with tqdm(test_dataloader, unit='batch') as tepoch:
-        for batch in tepoch:
-            tepoch.set_description('Prediction')
+    with tqdm(test_dataloader, unit='batch') as ttest:
+        for batch in ttest:
+            ttest.set_description('Prediction')
 
             token_ids, labels = batch
                 
@@ -232,36 +195,47 @@ def predict(model, test_dataloader, device):
 
 def run_model():
         
-    initial_setup()
-
-    device = get_device()
-
-    # Parameters for model
+    # Training parameters
+    epochs = 100
+    batch_size = 64
+    max_comment_length = 256
     model_path = '../models/vanilla_model.pt'
 
-    tokenizer = get_tokenizer('basic_english')
+    # Model parameters
+    dropout = 0.1
+    embed_dim_size = 128
+    num_encode_layers = 2  
+    num_attention_head = 2  
+    num_linear_nodes = 256
 
+    # Clear the cuda cache and get device type
+    utils.initial_setup()
+    device = utils.get_device()
+
+    # Import the model
     train_data = ToxicDataset(train_split=True)
     test_data = ToxicDataset(train_split=False)
     X, y = train_data.get_values()
     X_test, y_test = test_data.get_values()
 
-    # Preprocess the data into token ids 
     print('Preprocessing data')
+
+    # Preprocess the data into token ids 
     X = preprocess(X, 'Train')
     X_test = preprocess(X_test, 'Test')
     
     print('Finished preprocessing data')
-    special_tokens = ['<unk>', '<pad>']
-    train_iterator = map(tokenizer, iter(X))
-    vocab = build_vocab_from_iterator(train_iterator, specials=special_tokens)
-    vocab.set_default_index(vocab['<unk>'])
-    
-    max_comment_length = get_sentence_length(X, X_test, tokenizer)
+
+    # Set up the tokenizer and create the vocab matrix
+    tokenizer = get_tokenizer('basic_english')
+    vocab = create_vocab(tokenizer, X)
 
     print('Encoding and padding data')
+
+    # Encode the data and pad/truncate the comment to same size
     X = get_tokens(X, tokenizer, max_comment_length, vocab, 'Train')
     X_test = get_tokens(X_test, tokenizer, max_comment_length, vocab, 'Test')
+    
     print('Finished encoding and padding data')
 
     # Split train data into train and validation sets 
@@ -269,37 +243,33 @@ def run_model():
 
     # Create the tensors and dataloaders for training
     print('Creating tensors and dataloaders')
-    train_tensors = create_tensors(X_train, y_train)
-    val_tensors = create_tensors(X_val, y_val)
-    test_tensors = create_tensors(X_test, y_test)
+    train_tensors = utils.create_tensors(X_train, y_train)
+    validation_tensors = utils.create_tensors(X_val, y_val)
+    test_tensors = utils.create_tensors(X_test, y_test)
 
-    train_dataloader = get_dataloader(train_tensors, batch_size, train=True)
-    val_dataloader = get_dataloader(val_tensors, batch_size)
-    test_dataloader = get_dataloader(test_tensors, batch_size)
+    train_dataloader = utils.get_dataloader(train_tensors, batch_size, train=True)
+    val_dataloader = utils.get_dataloader(validation_tensors, batch_size)
+    test_dataloader = utils.get_dataloader(test_tensors, batch_size)
     
     print('Finished creating tensors and dataloaders')
 
     print('Start Training')
 
-    ntokens = len(vocab)
-    nhead = 2  
-    nlayers = 2  
-    emsize = 128
-    d_hid = 256
-    dropout = 0.1
-    epochs = 100
-    batch_size = 64
+    # Create model
+    model = Transformer(len(vocab), embed_dim_size, 
+                        num_attention_head, num_linear_nodes, 
+                        num_encode_layers, max_comment_length, dropout)
 
-    model = Transformer(ntokens, emsize, nhead, d_hid, 
-                        nlayers, max_comment_length, dropout).to(device)
+    # Send model to device
+    model.to(device)
 
-    optimizer = AdamW(model.parameters())
-
+    # Model utilities
+    optimizer = Adam(model.parameters())
     criterion = nn.CrossEntropyLoss()
-
     early_stopping = EarlyStopping(patience=5)
 
     min_loss = np.inf
+    # Train the model and save best model 
     for epoch in range(epochs):
         print(f'\nEpoch {epoch + 1}')
         train(model, train_dataloader, device, criterion, optimizer)
@@ -310,17 +280,19 @@ def run_model():
             print('Saving best model')
             torch.save(model.state_dict(), model_path)
         
+        # Stop training early if no decrease in validation loss
         early_stopping(loss)
         if early_stopping.stop:
             break
 
     print('Finished Training')
     
+    # Load the best model
     if os.path.exists(model_path):
         model.load_state_dict(torch.load(model_path))
     
     # Compute predicted probabilities on the test set
     probabilities = predict(model, test_dataloader, device)
 
-    # Evaluate the Bert classifier
+    # Evaluate the transformer model
     evaluate_roc(probabilities, y_test, 'vanilla')
