@@ -31,7 +31,7 @@ def text_preprocessing(comment):
     # Remove trailing whitespace
     comment = re.sub(r'\s+', ' ', comment).strip()
 
-    return s
+    return comment
 
 # Calculates the term frequency-inverse document frequency for 
 # the train and test datasets
