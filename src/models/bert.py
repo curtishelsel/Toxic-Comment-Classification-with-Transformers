@@ -1,32 +1,25 @@
+# A BERT model for toxic comment sentiment analysis
+# CAP6640 - Spring 2022  
+#   
+# Portions of this code are modified from this tutorial:
+# https://skimai.com/fine-tuning-bert-for-sentiment-analysis/
+
+import os
 import torch
 import numpy as np
 import torch.nn as nn
 from tqdm import tqdm
 from torch.optim import AdamW
 import torch.nn.functional as F
-from transformers import logging
 from transformers import BertTokenizer
 from utils.roc_auc import evaluate_roc
 from data.toxic_dataset import ToxicDataset
+from utils.earlystopping import EarlyStopping
 from models.bertclassifier import BertClassifier
 from sklearn.model_selection import train_test_split
-from utils.text_processing import bert_text_preprocessing
-from torch.utils.data import TensorDataset, DataLoader
-
-# Turns off warnings for BERT and clears the cuda cache
-def initial_setup():
-    logging.set_verbosity_error()
-    torch.cuda.empty_cache()
-    
-# Checks for the available device on the system and returns device type
-def get_device():
-
-    use_cuda = torch.cuda.is_available()
-    device = torch.device('cuda' if use_cuda else 'cpu')
-
-    print('Using {} for training.'.format(device))
-
-    return device
+from utils.text_processing import bert_text_formatting
+from transformers import get_linear_schedule_with_warmup
+import utils.utils as utils
  
 # Preprocesses the data provided into tokens and encodes them with BERT'S
 # pretrained tokenizer and returns token_ids and attention masks
@@ -44,7 +37,7 @@ def preprocess(data, tokenizer, name):
         for comment in tdata:
             encoded = tokenizer.encode_plus(
                 text=bert_text_preprocessing(comment),
-                max_length=512, 
+                max_length=256, # Truncates only 277 comments 
                 padding='max_length',
                 truncation='longest_first',
                 return_attention_mask=True
@@ -55,28 +48,8 @@ def preprocess(data, tokenizer, name):
 
     return token_ids, attention_masks
 
-# Creates the tensors for the token ids, masks, and labels
-def create_tensors(token_ids, masks, label):
-
-    token_ids = torch.tensor(token_ids)
-    masks = torch.tensor(masks)
-    label = torch.tensor(label)
-
-    return token_ids, masks, label
-
-# Creates the dataloader from the token ids, masks, and labels
-def get_dataloader(tensors, batch_size, shuffle=True):
-
-    token_ids, masks, labels = tensors
-    # Create the dataset from the tensors
-    data = TensorDataset(token_ids, masks, labels)
-    # Create the dataloader from the dataset
-    dataloader = DataLoader(data, shuffle=shuffle, batch_size=batch_size)
-    
-    return dataloader
-
-# Trains the model
-def train(model, train_dataloader, device, criterion, optimizer):
+# Trains the BERT model until early stopping is reached
+def train(model, train_dataloader, device, criterion, optimizer, scheduler):
 
     # Set model to train mode before each epoch
     model.train()
@@ -86,7 +59,10 @@ def train(model, train_dataloader, device, criterion, optimizer):
     # Iterate over entire training samples (1 epoch)
     with tqdm(train_dataloader, unit='batch') as tepoch:
         for step, batch in enumerate(tepoch):
-            tepoch.set_description('Training')
+
+            # Shows the changes in training loss over batches
+            current_loss = train_loss / (step + 1)
+            tepoch.set_description('Training {:.4f}'.format(current_loss))
             
             token_ids, masks, labels = batch
             
@@ -115,26 +91,30 @@ def train(model, train_dataloader, device, criterion, optimizer):
 
             # Computes gradient based on final loss
             optimizer.step()
+            scheduler.step()
 
     # Compute the average loss
     average_loss = train_loss / len(train_dataloader)
 
-    return average_loss
+    print('Train Loss: {:.4f}'.format(average_loss))
 
 
-# Validates the trained model on unsee data
+# Validates the trained BERT model on unseen an dataset
 def validate(model, val_dataloader, device, criterion):
 
     # Set model to eval mode before each epoch
     model.eval()
 
-    val_accuracy = 0.0
-    val_loss = 0.0
+    validation_loss = 0
+    validation_accuracy = 0
 
     # Iterate over entire validation samples (1 epoch)
     with tqdm(val_dataloader, unit='batch') as tepoch:
-        for batch in tepoch:
-            tepoch.set_description('Validation')
+        for step, batch in enumerate(tepoch):
+            
+            # Shows the changes in training loss over batches
+            current_loss = validation_loss / (step + 1)
+            tepoch.set_description('Validation {:.4f}'.format(current_loss))
 
             token_ids, masks, labels = batch
             
@@ -151,19 +131,22 @@ def validate(model, val_dataloader, device, criterion):
             loss = criterion(output, labels)
 
             # Update the running validation loss
-            val_loss += loss.item()
+            validation_loss += loss.item()
 
-            preds = torch.argmax(output, dim=1).flatten()
+            predictions = torch.argmax(output, dim=1).flatten()
 
             # Update the running accuracy
-            accuracy = (preds == labels).cpu().numpy().mean() * 100
-            val_accuracy += accuracy
+            accuracy = (predictions == labels).cpu().numpy().mean() * 100
+            validation_accuracy += accuracy
 
-    # Compute the average loss
-    val_loss = val_loss / len(val_dataloader)
-    val_accuracy = val_accuracy / len(val_dataloader)
+    # Compute the average loss and accuracy
+    validation_loss = validation_loss / len(val_dataloader)
+    validation_accuracy = validation_accuracy / len(val_dataloader)
 
-    return val_loss, val_accuracy
+    print('Validation Loss: {:.4f}'.format(validation_loss))
+    print('Validation Accuracy: {:.1f}'.format(validation_accuracy))
+
+    return validation_loss
 
 # Makes predictions on a test set
 def predict(model, test_dataloader, device):
@@ -174,40 +157,44 @@ def predict(model, test_dataloader, device):
     predictions = []
 
     # Iterate over entire set of test samples 
-    for batch in test_dataloader:
+    with tqdm(test_dataloader, unit='batch') as tepoch:
+        for batch in tepoch:
+            tepoch.set_description('Prediction')
 
-        token_ids, masks, labels = batch
-            
-        token_ids = token_ids.to(device)
-        masks = masks.to(device)
-        labels = labels.to(device)
+            token_ids, masks, labels = batch
+                
+            token_ids = token_ids.to(device)
+            masks = masks.to(device)
+            labels = labels.to(device)
 
-        # Run through model to get predictions
-        with torch.no_grad():
-            output = model(token_ids, masks)
+            # Run through model to get predictions
+            with torch.no_grad():
+                output = model(token_ids, masks)
 
-        predictions.append(output)
+            predictions.append(output)
     
-    predictions = torch.cat(predictions, dim=0)
-
     # Get probabilities for the AUC score
-    probabilities = F.softmax(predictions, dim=1).cpu().numpy()
+    predictions = torch.cat(predictions, dim=0)
+    predictions = F.softmax(predictions, dim=1).cpu().numpy()
 
-    return probabilities
+    return predictions
 
 def run_model():
         
-    initial_setup()
+    utils.initial_setup()
+    device = utils.get_device()
 
     # Parameters for model
-    epochs = 2
-    batch_size = 8
-    device = get_device()
+    epochs = 100
+    batch_size = 16
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     criterion = nn.CrossEntropyLoss()
-    model = BertClassifier(freeze_bert=False)
+    early_stopping = EarlyStopping(patience=5)
+    model_path = '../models/bert_model.pt'
+
+    model = BertClassifier()
     model.to(device)
-    optimizer = AdamW(model.parameters())
+    optimizer = AdamW(model.parameters(), lr=1e-5)
 
     # Load the training and test data
     train_data = ToxicDataset(train_split=True)
@@ -221,6 +208,7 @@ def run_model():
    
     # Preprocess the data into BERT token ids and masks
     print('Text preprocessing')
+
     train_inputs, train_masks = preprocess(X_train, tokenizer, 'Train')
     val_inputs, val_masks = preprocess(X_val, tokenizer, 'Validation')
     test_inputs, test_masks = preprocess(X_test, tokenizer, 'Test')
@@ -233,34 +221,52 @@ def run_model():
     val_tensors = create_tensors(val_inputs, val_masks, y_val)
     test_tensors = create_tensors(test_inputs, test_masks, y_test)
 
-    train_dataloader = get_dataloader(train_tensors, batch_size)
-    val_dataloader = get_dataloader(val_tensors, batch_size, shuffle=False)
-    test_dataloader = get_dataloader(test_tensors, batch_size, shuffle=False)
+    train_dataloader = get_dataloader(train_tensors, batch_size, train=True)
+    val_dataloader = get_dataloader(val_tensors, batch_size)
+    test_dataloader = get_dataloader(test_tensors, batch_size)
     
     print('Finished creating tensors and dataloaders')
 
     print('Start Training')
 
-    train_losses = []
-    val_losses= []
-    accuracies = []
+    total_steps = len(train_dataloader) * epochs
+
+    scheduler = get_linear_schedule_with_warmup(optimizer,
+                                                num_warmup_steps=0,
+                                                num_training_steps=total_steps)
+
+    min_loss = np.inf
+
     for epoch in range(epochs):
         print(f'Epoch {epoch + 1}')
-        train_loss = train(model, train_dataloader, device, criterion, optimizer)
-        val_loss, val_accuracy = validate(model, val_dataloader, device, criterion)
-        
-        train_losses.append(train_loss)
-        val_losses.append(val_loss)
-        accuracies.append(val_accuracy)
-        
-        print('Train Loss: {:.4f}'.format(train_loss))
-        print('Validation Loss: {:.4f}'.format(val_loss))
-        print('Accuracy: {:.1f}%'.format(val_accuracy))
 
+        train(model, train_dataloader, device, criterion, optimizer, scheduler)
+
+        loss = validate(model, val_dataloader, device, criterion)
+        ''' 
+        if loss < min_loss:
+            min_loss = loss
+            print('Saving best model')
+            torch.save(model.state_dict(), model_path)
+        ''' 
+    
+        early_stopping(loss)
+        if early_stopping.stop:
+            break
+        
     print('Finished Training')
     
+    '''
+    print('Start Prediction')
+    
+    if os.path.exists(model_path):
+        model.load_state_dict(torch.load(model_path))
+
     # Compute predicted probabilities on the test set
     probabilities = predict(model, test_dataloader, device)
 
+    print('Finished Prediction')
+
     # Evaluate the Bert classifier
     evaluate_roc(probabilities, y_test, 'BERT')
+    '''
