@@ -1,7 +1,6 @@
 # This file contains the class for early stopping
 # during training based on validation loss
-# Author: Curtis Helsel
-# December 2021
+# CAP6640 - Spring 2022
 
 import torch
 import numpy as np
@@ -40,7 +39,7 @@ class EarlyStopping:
     
         # If the counter is over the patience level
         # set the stop variable for early stopping
-        if self.epoch_count > self.patience:
+        if self.epoch_count >= self.patience:
             self.stop = True
             print('Maximum epoch threshold exeeded.')
             print('Training stopping early.')
