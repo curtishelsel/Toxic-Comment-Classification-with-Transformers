@@ -4,44 +4,13 @@
 # Portions of this code are modified from this tutorial:
 # https://skimai.com/fine-tuning-bert-for-sentiment-analysis/
 
-import os
-import pickle
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from data.toxic_dataset import ToxicDataset
 from sklearn.naive_bayes import MultinomialNB
 from utils.roc_auc import get_auc_CV, evaluate_roc
-from utils.text_processing import text_preprocessing, get_tfidf
-
-# Load previously formatted data from disk or format data 
-# for use in the naive bayes model
-def preprocess(data, name):
-
-    path = '../data/processed/clean_' + name.lower() + '.p' 
-
-    # If the formatted data exists, load it from processed data directory
-    if os.path.exists(path):
-
-        processed_data = pickle.load(open(path, 'rb'))
-        print('Loading clean_{} from disk'.format(name.lower()))
-
-    # Else, format the data and save to processed data directory
-    else:
-
-        processed_data = []
-
-        with tqdm(data) as tdata:
-
-            tdata.set_description('{} Set'.format(name))
-
-            for comment in tdata:
-                processed_data.append(text_preprocessing(comment))
-
-        # Save data to processed data directory
-        pickle.dump(processed_data, open(path, 'wb'))
-
-    return np.array(processed_data)
+from utils.text_processing import preprocess, get_tfidf
 
 def run_model():
     
