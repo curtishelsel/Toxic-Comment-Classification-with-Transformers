@@ -4,6 +4,7 @@
 # Portions of this code are modified from this tutorial:
 # https://skimai.com/fine-tuning-bert-for-sentiment-analysis/
 
+import os
 import torch
 import numpy as np
 import torch.nn as nn
@@ -253,7 +254,7 @@ def run_model():
             break
         
     print('Finished Training')
-    
+
     print('Start Prediction')
     
     if os.path.exists(model_path):
