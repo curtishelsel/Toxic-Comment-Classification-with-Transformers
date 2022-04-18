@@ -120,7 +120,7 @@ def validate(model, val_dataloader, device, criterion):
     with tqdm(val_dataloader, unit='batch') as tvalidation:
         for step, batch in enumerate(tvalidation):
 
-            # Shows the changes in training loss over batches
+            # Shows the changes in validation loss over batches
             current_loss = validation_loss / (step + 1)
             description = 'Validation Loss {:.4}'.format(current_loss)
             tvalidation.set_description(description)
@@ -158,7 +158,6 @@ def validate(model, val_dataloader, device, criterion):
 # Makes predictions on a test set
 def predict(model, test_dataloader, device):
 
-
     # Set model to eval mode before each epoch
     model.eval()
 
@@ -171,7 +170,6 @@ def predict(model, test_dataloader, device):
 
             token_ids, labels = batch
                 
-            #token_ids = token_ids.type(torch.LongTensor)
             token_ids = token_ids.to(device)
             labels = labels.to(device)
 
@@ -181,10 +179,8 @@ def predict(model, test_dataloader, device):
 
             predictions.append(output)
     
-    
-    predictions = torch.cat(predictions, dim=0)
-
     # Get probabilities for the AUC score
+    predictions = torch.cat(predictions, dim=0)
     probabilities = F.softmax(predictions, dim=1).cpu().numpy()
 
     return probabilities
@@ -208,7 +204,7 @@ def run_model():
     utils.initial_setup()
     device = utils.get_device()
 
-    # Import the model
+    # Load the training and test data
     train_data = ToxicDataset(train_split=True)
     test_data = ToxicDataset(train_split=False)
     X, y = train_data.get_values()
@@ -264,8 +260,8 @@ def run_model():
     criterion = nn.CrossEntropyLoss()
     early_stopping = EarlyStopping(patience=5)
 
-    min_loss = np.inf
     # Train the model and save best model 
+    min_loss = np.inf
     for epoch in range(epochs):
         print(f'\nEpoch {epoch + 1}')
         train(model, train_dataloader, device, criterion, optimizer)
@@ -282,13 +278,16 @@ def run_model():
             break
 
     print('Finished Training')
-    
+
+    print('Start Prediction')
     # Load the best model
     if os.path.exists(model_path):
         model.load_state_dict(torch.load(model_path))
     
     # Compute predicted probabilities on the test set
     probabilities = predict(model, test_dataloader, device)
+
+    print('Finished Prediction')
 
     # Evaluate the transformer model
     evaluate_roc(probabilities, y_test, 'vanilla')
