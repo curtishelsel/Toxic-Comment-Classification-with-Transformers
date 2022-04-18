@@ -30,14 +30,14 @@ def create_tensors(token_ids, label, masks=None):
     token_ids = torch.tensor(token_ids)
     label = torch.tensor(label)
 
-    if masks == None:
+    if masks is None:
         return token_ids, label
     
     masks = torch.tensor(masks)
 
     return token_ids, masks, label
 
-# Creates the dataloader from the token ids, labels, and if avialbe, masks
+# Creates the dataloader from the token ids, labels, and if available, masks
 def get_dataloader(tensors, batch_size, train=False):
 
     if len(tensors) == 2:
