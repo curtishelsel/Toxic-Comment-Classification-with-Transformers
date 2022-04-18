@@ -4,11 +4,11 @@
 # Portions of this code are modified from this tutorial:
 # https://skimai.com/fine-tuning-bert-for-sentiment-analysis/
 
-import os
 import torch
 import numpy as np
 import torch.nn as nn
 from tqdm import tqdm
+import utils.utils as utils
 from torch.optim import AdamW
 import torch.nn.functional as F
 from transformers import BertTokenizer
@@ -19,7 +19,6 @@ from models.bertclassifier import BertClassifier
 from sklearn.model_selection import train_test_split
 from utils.text_processing import bert_text_formatting
 from transformers import get_linear_schedule_with_warmup
-import utils.utils as utils
  
 # Preprocesses the data provided into tokens and encodes them with BERT'S
 # pretrained tokenizer and returns token_ids and attention masks
@@ -36,7 +35,7 @@ def preprocess(data, tokenizer, name):
         # with pretrained BERT tokenizer
         for comment in tdata:
             encoded = tokenizer.encode_plus(
-                text=bert_text_preprocessing(comment),
+                text=bert_text_formatting(comment),
                 max_length=256, # Truncates only 277 comments 
                 padding='max_length',
                 truncation='longest_first',
@@ -57,13 +56,14 @@ def train(model, train_dataloader, device, criterion, optimizer, scheduler):
     train_loss= 0.0
 
     # Iterate over entire training samples (1 epoch)
-    with tqdm(train_dataloader, unit='batch') as tepoch:
-        for step, batch in enumerate(tepoch):
+    with tqdm(train_dataloader, unit='batch') as ttrain:
+        for step, batch in enumerate(ttrain):
 
             # Shows the changes in training loss over batches
             current_loss = train_loss / (step + 1)
-            tepoch.set_description('Training {:.4f}'.format(current_loss))
-            
+            description = 'Training Loss {:.4}'.format(current_loss)
+            ttrain.set_description(description)
+
             token_ids, masks, labels = batch
             
             # Push data/label to correct device
@@ -71,7 +71,7 @@ def train(model, train_dataloader, device, criterion, optimizer, scheduler):
             masks = masks.to(device)
             labels = labels.to(device)
 
-            # Reset model gradients Avoids grad accumulation
+            # Reset model gradients Avoid grad accumulation
             model.zero_grad()
 
             # Do forward pass for current set of data
@@ -93,28 +93,23 @@ def train(model, train_dataloader, device, criterion, optimizer, scheduler):
             optimizer.step()
             scheduler.step()
 
-    # Compute the average loss
-    average_loss = train_loss / len(train_dataloader)
-
-    print('Train Loss: {:.4f}'.format(average_loss))
-
-
 # Validates the trained BERT model on unseen an dataset
 def validate(model, val_dataloader, device, criterion):
 
     # Set model to eval mode before each epoch
     model.eval()
 
-    validation_loss = 0
-    validation_accuracy = 0
+    validation_accuracy = 0.0
+    validation_loss = 0.0
 
     # Iterate over entire validation samples (1 epoch)
-    with tqdm(val_dataloader, unit='batch') as tepoch:
-        for step, batch in enumerate(tepoch):
+    with tqdm(val_dataloader, unit='batch') as tvalidation:
+        for step, batch in enumerate(tvalidation):
             
-            # Shows the changes in training loss over batches
+            # Shows the changes in validation loss over batches
             current_loss = validation_loss / (step + 1)
-            tepoch.set_description('Validation {:.4f}'.format(current_loss))
+            description = 'Validation Loss {:.4}'.format(current_loss)
+            tvalidation.set_description(description)
 
             token_ids, masks, labels = batch
             
@@ -143,7 +138,6 @@ def validate(model, val_dataloader, device, criterion):
     validation_loss = validation_loss / len(val_dataloader)
     validation_accuracy = validation_accuracy / len(val_dataloader)
 
-    print('Validation Loss: {:.4f}'.format(validation_loss))
     print('Validation Accuracy: {:.1f}'.format(validation_accuracy))
 
     return validation_loss
@@ -157,9 +151,9 @@ def predict(model, test_dataloader, device):
     predictions = []
 
     # Iterate over entire set of test samples 
-    with tqdm(test_dataloader, unit='batch') as tepoch:
-        for batch in tepoch:
-            tepoch.set_description('Prediction')
+    with tqdm(test_dataloader, unit='batch') as ttest:
+        for batch in ttest:
+            ttest.set_description('Prediction')
 
             token_ids, masks, labels = batch
                 
@@ -175,31 +169,24 @@ def predict(model, test_dataloader, device):
     
     # Get probabilities for the AUC score
     predictions = torch.cat(predictions, dim=0)
-    predictions = F.softmax(predictions, dim=1).cpu().numpy()
+    probabilities = F.softmax(predictions, dim=1).cpu().numpy()
 
-    return predictions
+    return probabilities
 
 def run_model():
         
-    utils.initial_setup()
-    device = utils.get_device()
-
-    # Parameters for model
+    # Training parameters
     epochs = 100
     batch_size = 16
-    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-    criterion = nn.CrossEntropyLoss()
-    early_stopping = EarlyStopping(patience=5)
     model_path = '../models/bert_model.pt'
 
-    model = BertClassifier()
-    model.to(device)
-    optimizer = AdamW(model.parameters(), lr=1e-5)
-
+    # Clear the cuda cache and get device type
+    utils.initial_setup()
+    device = utils.get_device()
+    
     # Load the training and test data
     train_data = ToxicDataset(train_split=True)
     test_data = ToxicDataset(train_split=False)
-    
     X, y = train_data.get_values()
     X_test, y_test = test_data.get_values()
 
@@ -209,6 +196,8 @@ def run_model():
     # Preprocess the data into BERT token ids and masks
     print('Text preprocessing')
 
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+
     train_inputs, train_masks = preprocess(X_train, tokenizer, 'Train')
     val_inputs, val_masks = preprocess(X_val, tokenizer, 'Validation')
     test_inputs, test_masks = preprocess(X_test, tokenizer, 'Test')
@@ -217,46 +206,54 @@ def run_model():
 
     # Create the tensors and dataloaders for training
     print('Creating tensors and dataloaders')
-    train_tensors = create_tensors(train_inputs, train_masks, y_train)
-    val_tensors = create_tensors(val_inputs, val_masks, y_val)
-    test_tensors = create_tensors(test_inputs, test_masks, y_test)
+    train_tensors = utils.create_tensors(train_inputs, y_train, train_masks)
+    val_tensors = utils.create_tensors(val_inputs, y_val, val_masks)
+    test_tensors = utils.create_tensors(test_inputs, y_test, test_masks)
 
-    train_dataloader = get_dataloader(train_tensors, batch_size, train=True)
-    val_dataloader = get_dataloader(val_tensors, batch_size)
-    test_dataloader = get_dataloader(test_tensors, batch_size)
+    train_dataloader = utils.get_dataloader(train_tensors, batch_size, train=True)
+    val_dataloader = utils.get_dataloader(val_tensors, batch_size)
+    test_dataloader = utils.get_dataloader(test_tensors, batch_size)
     
     print('Finished creating tensors and dataloaders')
 
     print('Start Training')
 
-    total_steps = len(train_dataloader) * epochs
+    # Create model
+    model = BertClassifier()
+    
+    # Send model to device
+    model.to(device)
 
+    # Model utilities
+    optimizer = AdamW(model.parameters(), lr=1e-5)
+    criterion = nn.CrossEntropyLoss()
+    early_stopping = EarlyStopping(patience=5)
+
+
+    total_steps = len(train_dataloader) * epochs
     scheduler = get_linear_schedule_with_warmup(optimizer,
                                                 num_warmup_steps=0,
                                                 num_training_steps=total_steps)
 
+    # Train the model and save best model 
     min_loss = np.inf
-
     for epoch in range(epochs):
         print(f'Epoch {epoch + 1}')
-
         train(model, train_dataloader, device, criterion, optimizer, scheduler)
-
         loss = validate(model, val_dataloader, device, criterion)
-        ''' 
+
         if loss < min_loss:
             min_loss = loss
             print('Saving best model')
             torch.save(model.state_dict(), model_path)
-        ''' 
     
+        # Stop training early if no decrease in validation loss
         early_stopping(loss)
         if early_stopping.stop:
             break
         
     print('Finished Training')
     
-    '''
     print('Start Prediction')
     
     if os.path.exists(model_path):
@@ -269,4 +266,3 @@ def run_model():
 
     # Evaluate the Bert classifier
     evaluate_roc(probabilities, y_test, 'BERT')
-    '''

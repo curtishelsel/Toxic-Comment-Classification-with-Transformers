@@ -1,3 +1,9 @@
+# A custom BERT transformer model
+# CAP6640 - Spring 2022  
+#   
+# Portions of this code are modified from this tutorial:
+# https://pytorch.org/tutorials/beginner/transformer_tutorial.html
+
 import torch
 import torch.nn as nn
 from transformers import BertModel
