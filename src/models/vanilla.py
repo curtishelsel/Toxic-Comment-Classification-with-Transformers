@@ -231,7 +231,8 @@ def run_model():
     print('Finished encoding and padding data')
 
     # Split train data into train and validation sets 
-    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.1)    
+    X_train, X_val, y_train, y_val = train_test_split(X, y, 
+                                            test_size=0.1, random_state=6640)    
 
     # Create the tensors and dataloaders for training
     print('Creating tensors and dataloaders')

@@ -192,7 +192,8 @@ def run_model():
     X_test, y_test = test_data.get_values()
 
     # Split train data into train and validation sets 
-    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.1)    
+    X_train, X_val, y_train, y_val = train_test_split(X, y, 
+                                            test_size=0.1, random_state=6640)    
    
     # Preprocess the data into BERT token ids and masks
     print('Text preprocessing')
